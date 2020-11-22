@@ -8,9 +8,8 @@ class Environment:
 	def __init__(self, csv_path):
 		self.points = 0.00001
 		self.spread_points = 5
-		self.tp_points = 50
-		self.sl_points = 50
-		self.epsilon = 1.0
+		self.tp_points = 500
+		self.sl_points = 500
 
 		self.dataset = []
 		self.next_index = 0;
@@ -38,8 +37,9 @@ class Environment:
 		self.action_space = [0, 1, 2] # 0: pass, 1: long, 2: short
 
 	def report(self):
-		return "Long Trades: {} ({} won), Short Trades: {} ({} won), profit: {} (gross gain: {}, gross loss: {})".format(
+		return "Long Trades: {} ({} won), Short Trades: {} ({} won), won %: {}, profit: {} (gross gain: {}, gross loss: {})".format(
 			self.long_trades, self.long_trades_won, self.short_trades, self.short_trades_won,
+			(self.long_trades_won + self.short_trades_won) / (self.long_trades + self.short_trades),
 			round(self.gross_profit + self.gross_loss), round(self.gross_profit), round(self.gross_loss)
 		)
 
@@ -56,24 +56,16 @@ class Environment:
 		return self.step(self.action_space[0])[0]
 
 	def step(self, action):
-		next_states = []
-		rewards = []
-		dones = []
-        
-		start_step_index = self.next_index
 		reward, nindex = self.__calculate_reward(action, self.next_index)
 
+		distance = max(1, nindex - self.next_index)
 		self.next_index = nindex
-		for index in range(start_step_index, self.next_index): 
-			next_state, has_next_state = self.__build_state(index)
-			done = False
-			if not has_next_state: done = True
-			next_states.append(next_state)
-			rewards.append(reward)
-			dones.append(done)
+		next_state, has_next_state = self.__build_state(self.next_index)
 
-		return (next_states, rewards, dones)
+		done = False
+		if not has_next_state: done = True
 
+		return (next_state, reward / distance, done)
 
 	def __build_state(self, index):
 		if index >= len(self.dataset):
@@ -82,23 +74,20 @@ class Environment:
 		row = self.dataset[index]
 		hour = tf.keras.utils.to_categorical(row['hour'].split(':')[0], 24)
 		
-		state = [
-			row['open'],
-			row['low'],
-			row['high'],
-			row['tick_vol'],
-			row['vol']
-		]
+		state = []
+
 		for i in range(index,index-48,-1):
 			if not self.dataset[i]:
 				state.append(self.dataset[i]['close'])
 			else:
 				state.append(row['close'])
+
 		return (np.concatenate((hour, state)), True)
+		# return (state, True)
 
 	def __calculate_reward(self, action, index):
 		if action == 0: # pass
-			reward = 0.3
+			reward = -1
 			nindex = index + 1
 		if action == 1: # long
 			reward, nindex = self.__calculate_position_reward(True, index)
@@ -110,7 +99,7 @@ class Environment:
 		if action == 2: # short
 			reward, nindex = self.__calculate_position_reward(False, index)
 			self.short_trades += 1
-            
+
 			if reward > 0: self.short_trades_won += 1
 			self.gross_profit += max(0, reward)
 			self.gross_loss += min(0, reward)
@@ -165,4 +154,3 @@ class Environment:
 
 	def __points(self, val):
 		return val * 0.00001
-
